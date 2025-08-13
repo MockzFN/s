@@ -659,8 +659,14 @@
                     iceServers: [
                         { urls: 'stun:stun.l.google.com:19302' },
                         { urls: 'stun:stun1.l.google.com:19302' },
-                        { urls: 'stun:stun2.l.google.com:19302' }
-                    ]
+                        { urls: 'stun:stun2.l.google.com:19302' },
+                        { urls: 'stun:stun3.l.google.com:19302' },
+                        { urls: 'stun:stun4.l.google.com:19302' },
+                        // Add more STUN servers for better connectivity
+                        { urls: 'stun:stun.services.mozilla.com' },
+                        { urls: 'stun:stun.ekiga.net' }
+                    ],
+                    iceCandidatePoolSize: 10
                 };
 
                 this.peerConnection = new RTCPeerConnection(config);
@@ -672,36 +678,68 @@
 
                 // Handle remote stream
                 this.peerConnection.ontrack = (event) => {
-                    console.log('Received remote stream');
+                    console.log('✅ Received remote stream');
                     this.remoteAudio.srcObject = event.streams[0];
                     this.showStatus('🎉 Connected! You can now talk.', 'connected');
                     this.controlsEl.classList.add('show');
                     this.connectionEstablished = true;
                 };
 
-                // Handle ICE candidates
+                // Handle ICE candidates with better logging
                 this.peerConnection.onicecandidate = (event) => {
                     if (event.candidate) {
-                        console.log('New ICE candidate');
+                        console.log('📡 New ICE candidate:', event.candidate.type);
                         this.shareConnectionData({
                             type: 'ice-candidate',
                             candidate: event.candidate,
                             roomCode: this.roomCode
                         });
+                    } else {
+                        console.log('📡 ICE gathering complete');
                     }
                 };
 
-                // Handle connection state changes
+                // Enhanced connection state handling
                 this.peerConnection.onconnectionstatechange = () => {
-                    console.log('Connection state:', this.peerConnection.connectionState);
-                    if (this.peerConnection.connectionState === 'connected') {
+                    const state = this.peerConnection.connectionState;
+                    console.log('🔗 Connection state:', state);
+                    
+                    if (state === 'connected') {
                         this.showStatus('🎉 Connected! You can now talk.', 'connected');
-                    } else if (this.peerConnection.connectionState === 'disconnected') {
-                        this.showStatus('Disconnected', 'error');
+                        this.controlsEl.classList.add('show');
+                        this.connectionEstablished = true;
+                    } else if (state === 'connecting') {
+                        this.showStatus('🔄 Establishing connection...', 'connecting');
+                    } else if (state === 'disconnected') {
+                        this.showStatus('⚠️ Connection lost. Attempting to reconnect...', 'connecting');
+                        // Try to reconnect
+                        setTimeout(() => this.attemptReconnect(), 2000);
+                    } else if (state === 'failed') {
+                        this.showStatus('❌ Connection failed. This might be due to firewall/network restrictions. Try refreshing both pages.', 'error');
                         this.controlsEl.classList.remove('show');
-                    } else if (this.peerConnection.connectionState === 'failed') {
-                        this.showStatus('Connection failed. Please try again.', 'error');
                     }
+                };
+
+                // ICE connection state
+                this.peerConnection.oniceconnectionstatechange = () => {
+                    const iceState = this.peerConnection.iceConnectionState;
+                    console.log('🧊 ICE connection state:', iceState);
+                    
+                    if (iceState === 'failed' || iceState === 'disconnected') {
+                        console.log('🔄 ICE connection issues, may need TURN server for this network');
+                    }
+                };
+
+                // Data channel for keep-alive (helps maintain connection)
+                this.dataChannel = this.peerConnection.createDataChannel('keepalive');
+                this.dataChannel.onopen = () => {
+                    console.log('📡 Data channel opened');
+                    // Send keep-alive every 30 seconds
+                    this.keepAliveInterval = setInterval(() => {
+                        if (this.dataChannel.readyState === 'open') {
+                            this.dataChannel.send('ping');
+                        }
+                    }, 30000);
                 };
             }
 
