@@ -347,15 +347,20 @@
             }
 
             bindEvents() {
-                this.createRoomBtn.addEventListener('click', () => this.createRoom());
-                this.joinRoomBtn.addEventListener('click', () => this.joinRoom());
-                this.muteBtn.addEventListener('click', () => this.toggleMute());
-                this.hangupBtn.addEventListener('click', () => this.hangUp());
-                this.volumeSlider.addEventListener('input', () => this.adjustVolume());
+                // Add null checks for all elements
+                if (this.createRoomBtn) this.createRoomBtn.addEventListener('click', () => this.createRoom());
+                if (this.joinRoomBtn) this.joinRoomBtn.addEventListener('click', () => this.joinRoom());
+                if (this.testMicBtn) this.testMicBtn.addEventListener('click', () => this.testMicrophone());
+                if (this.testMicBtn2) this.testMicBtn2.addEventListener('click', () => this.testMicrophone());
+                if (this.muteBtn) this.muteBtn.addEventListener('click', () => this.toggleMute());
+                if (this.hangupBtn) this.hangupBtn.addEventListener('click', () => this.hangUp());
+                if (this.volumeSlider) this.volumeSlider.addEventListener('input', () => this.adjustVolume());
                 
-                this.joinRoomCodeEl.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') this.joinRoom();
-                });
+                if (this.joinRoomCodeEl) {
+                    this.joinRoomCodeEl.addEventListener('keypress', (e) => {
+                        if (e.key === 'Enter') this.joinRoom();
+                    });
+                }
 
                 this.tabs.forEach(tab => {
                     tab.addEventListener('click', () => this.switchTab(tab.dataset.tab));
@@ -363,6 +368,9 @@
 
                 // Listen for connection data sharing via URL hash or localStorage
                 this.setupConnectionSharing();
+
+                // Run system diagnostics on load
+                this.runDiagnostics();
             }
 
             switchTab(tabName) {
@@ -373,8 +381,100 @@
                 document.getElementById(`${tabName}-tab`).classList.add('active');
             }
 
-            generateRoomCode() {
-                return Math.random().toString(36).substring(2, 8).toUpperCase();
+            async runDiagnostics() {
+                let diagnosticInfo = ['🔍 System Diagnostics:'];
+                
+                // Check protocol
+                diagnosticInfo.push(`📍 Protocol: ${window.location.protocol}`);
+                if (window.location.protocol === 'file:') {
+                    diagnosticInfo.push('⚠️ File protocol detected - microphone may not work');
+                }
+                
+                // Check if we're in an iframe/sandbox
+                if (window !== window.top) {
+                    diagnosticInfo.push('⚠️ Running in iframe - may have restrictions');
+                }
+                
+                // Check for required APIs
+                if (!navigator.mediaDevices) {
+                    diagnosticInfo.push('❌ MediaDevices API not available');
+                } else {
+                    diagnosticInfo.push('✅ MediaDevices API available');
+                }
+                
+                if (!window.RTCPeerConnection) {
+                    diagnosticInfo.push('❌ WebRTC not available');
+                } else {
+                    diagnosticInfo.push('✅ WebRTC available');
+                }
+
+                // Check permissions API
+                if (navigator.permissions) {
+                    try {
+                        const micPermission = await navigator.permissions.query({ name: 'microphone' });
+                        diagnosticInfo.push(`🎤 Mic permission: ${micPermission.state}`);
+                    } catch (e) {
+                        diagnosticInfo.push('🎤 Mic permission: unknown');
+                    }
+                } else {
+                    diagnosticInfo.push('🎤 Permissions API not available');
+                }
+
+                // Check for secure context
+                if (window.isSecureContext) {
+                    diagnosticInfo.push('✅ Secure context (HTTPS/localhost)');
+                } else {
+                    diagnosticInfo.push('❌ Not a secure context - microphone blocked');
+                }
+
+                console.log(diagnosticInfo.join('\n'));
+            }
+
+            async testMicrophone() {
+                try {
+                    this.showStatus('🧪 Testing microphone access...', 'connecting');
+                    
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: {
+                            echoCancellation: false,
+                            noiseSuppression: false,
+                            autoGainControl: false
+                        } 
+                    });
+                    
+                    // Test successful - stop the stream
+                    stream.getTracks().forEach(track => track.stop());
+                    
+                    this.showStatus('✅ Microphone test successful! You can now create/join rooms.', 'connected');
+                    
+                } catch (error) {
+                    console.error('Microphone test failed:', error);
+                    
+                    let errorDetails = [];
+                    errorDetails.push('❌ Microphone Test Failed');
+                    errorDetails.push(`Error: ${error.name} - ${error.message}`);
+                    
+                    // System-specific troubleshooting
+                    if (error.message.includes('Permission denied by system')) {
+                        errorDetails.push('');
+                        errorDetails.push('🔧 System-level fixes:');
+                        errorDetails.push('• Check OS microphone privacy settings');
+                        errorDetails.push('• Mac: System Preferences → Security → Microphone');
+                        errorDetails.push('• Windows: Settings → Privacy → Microphone');
+                        errorDetails.push('• Linux: Check pulseaudio/alsa permissions');
+                        errorDetails.push('• Restart browser after changing OS settings');
+                    }
+                    
+                    if (!window.isSecureContext) {
+                        errorDetails.push('');
+                        errorDetails.push('🔒 Security issue:');
+                        errorDetails.push('• Must use HTTPS or localhost');
+                        errorDetails.push('• file:// URLs are blocked');
+                        errorDetails.push('• Try: python -m http.server 8000');
+                    }
+                    
+                    this.showStatus(errorDetails.join('\n'), 'error');
+                }
             }
 
             async createRoom() {
@@ -422,57 +522,134 @@
                 }
             }
 
+            generateRoomCode() {
+                return Math.random().toString(36).substring(2, 8).toUpperCase();
+            }
+
             async requestMicrophoneAccess() {
                 if (this.localStream) return this.localStream;
 
                 try {
-                    this.showStatus('🎤 Click "Allow" when browser asks for microphone access...', 'connecting');
+                    this.showStatus('🎤 Attempting microphone access...', 'connecting');
+                    
+                    // Enhanced debugging
+                    console.log('🔍 Detailed microphone debugging:');
+                    console.log('- Protocol:', window.location.protocol);
+                    console.log('- Origin:', window.location.origin);
+                    console.log('- Is secure context:', window.isSecureContext);
+                    console.log('- User agent:', navigator.userAgent);
                     
                     // Check if we have permission first
                     if (navigator.permissions) {
                         const permission = await navigator.permissions.query({ name: 'microphone' });
-                        console.log('Microphone permission state:', permission.state);
+                        console.log('- Permission state:', permission.state);
                         
                         if (permission.state === 'denied') {
-                            throw new Error('Microphone permission was denied. Please enable it in browser settings.');
+                            throw new Error('Browser permission denied');
+                        }
+                    }
+
+                    // List available devices first
+                    try {
+                        const devices = await navigator.mediaDevices.enumerateDevices();
+                        const audioInputs = devices.filter(device => device.kind === 'audioinput');
+                        console.log('- Available audio inputs:', audioInputs.length);
+                        audioInputs.forEach((device, i) => {
+                            console.log(`  ${i}: ${device.label || 'Unknown Device'} (${device.deviceId.substring(0, 8)}...)`);
+                        });
+                        
+                        if (audioInputs.length === 0) {
+                            throw new Error('No microphone devices found');
+                        }
+                    } catch (deviceError) {
+                        console.log('- Could not enumerate devices:', deviceError.message);
+                    }
+
+                    // Try multiple constraint configurations
+                    const constraintOptions = [
+                        // Most basic - should work on any system
+                        { audio: true },
+                        // With minimal processing
+                        { 
+                            audio: {
+                                echoCancellation: false,
+                                noiseSuppression: false,
+                                autoGainControl: false
+                            }
+                        },
+                        // With specific device if available
+                        { 
+                            audio: {
+                                deviceId: 'default'
+                            }
+                        }
+                    ];
+
+                    for (let i = 0; i < constraintOptions.length; i++) {
+                        try {
+                            console.log(`- Trying constraint option ${i + 1}:`, constraintOptions[i]);
+                            
+                            this.localStream = await navigator.mediaDevices.getUserMedia(constraintOptions[i]);
+                            
+                            console.log('✅ Microphone access granted with option', i + 1);
+                            console.log('- Stream tracks:', this.localStream.getTracks().length);
+                            this.localStream.getTracks().forEach(track => {
+                                console.log(`  - ${track.kind}: ${track.label} (enabled: ${track.enabled})`);
+                            });
+                            
+                            this.showStatus('✅ Microphone ready!', 'connected');
+                            return this.localStream;
+                            
+                        } catch (constraintError) {
+                            console.log(`- Option ${i + 1} failed:`, constraintError.name, constraintError.message);
+                            if (i === constraintOptions.length - 1) {
+                                throw constraintError; // Re-throw the last error
+                            }
                         }
                     }
                     
-                    this.localStream = await navigator.mediaDevices.getUserMedia({ 
-                        audio: {
-                            echoCancellation: true,
-                            noiseSuppression: true,
-                            autoGainControl: true,
-                            sampleRate: 44100
-                        } 
-                    });
-                    
-                    console.log('✅ Microphone access granted');
-                    this.showStatus('✅ Microphone ready!', 'connected');
-                    return this.localStream;
-                    
                 } catch (error) {
-                    console.error('Microphone access failed:', error);
+                    console.error('❌ All microphone access attempts failed:', error);
                     
-                    let errorMessage;
-                    if (error.name === 'NotAllowedError' || error.message.includes('denied')) {
-                        errorMessage = `🚫 Microphone access denied. Please:
-                        
-1. Look for 🎤 icon in browser address bar and click "Allow"
-2. Or go to browser Settings → Privacy → Microphone → Allow this site
-3. Refresh the page and try again
-4. Make sure you're using HTTPS or localhost (not just file://)
-
-Current URL protocol: ${window.location.protocol}`;
+                    let errorMessage = ['❌ Microphone Access Failed'];
+                    
+                    if (error.name === 'NotAllowedError') {
+                        if (error.message.includes('Permission denied by system')) {
+                            errorMessage.push('');
+                            errorMessage.push('🔧 SYSTEM-LEVEL PERMISSION ISSUE:');
+                            errorMessage.push('This means your operating system is blocking access.');
+                            errorMessage.push('');
+                            errorMessage.push('💻 Windows fixes:');
+                            errorMessage.push('• Windows Settings → Privacy → Microphone → On');
+                            errorMessage.push('• Allow desktop apps to access microphone');
+                            errorMessage.push('• Check Windows Sound settings');
+                            errorMessage.push('');
+                            errorMessage.push('🍎 Mac fixes:');
+                            errorMessage.push('• System Preferences → Security & Privacy → Microphone');
+                            errorMessage.push('• Enable for your browser');
+                            errorMessage.push('• Try: sudo tccutil reset Microphone');
+                            errorMessage.push('');
+                            errorMessage.push('🐧 Linux fixes:');
+                            errorMessage.push('• Check: pavucontrol or alsamixer');
+                            errorMessage.push('• sudo usermod -a -G audio $USER');
+                            errorMessage.push('• Restart browser after changes');
+                        } else {
+                            errorMessage.push('Browser blocked microphone access');
+                            errorMessage.push('• Check address bar for 🎤 icon');
+                            errorMessage.push('• Go to site settings and allow microphone');
+                        }
                     } else if (error.name === 'NotFoundError') {
-                        errorMessage = '🎤 No microphone found. Please connect a microphone and try again.';
+                        errorMessage.push('No microphone hardware detected');
                     } else if (error.name === 'NotReadableError') {
-                        errorMessage = '🎤 Microphone is being used by another application. Please close other apps using the microphone.';
+                        errorMessage.push('Microphone is being used by another app');
                     } else {
-                        errorMessage = '❌ Microphone error: ' + error.message;
+                        errorMessage.push(`Unknown error: ${error.message}`);
                     }
                     
-                    this.showStatus(errorMessage, 'error');
+                    errorMessage.push('');
+                    errorMessage.push('🔄 Try: Close browser completely and restart');
+                    
+                    this.showStatus(errorMessage.join('\n'), 'error');
                     throw error;
                 }
             }
