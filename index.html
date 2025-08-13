@@ -265,6 +265,7 @@
         <div id="create-tab" class="tab-content active">
             <div class="section">
                 <h2>🏠 Create a Room</h2>
+                <button id="testMicBtn">🔍 Test Microphone First</button>
                 <button id="createRoomBtn">Create Room & Enable Mic</button>
                 <div id="roomCode" class="room-code hidden"></div>
                 <div class="info">
@@ -330,6 +331,8 @@
             initElements() {
                 this.createRoomBtn = document.getElementById('createRoomBtn');
                 this.joinRoomBtn = document.getElementById('joinRoomBtn');
+                this.testMicBtn = document.getElementById('testMicBtn');
+                this.testMicBtn2 = document.getElementById('testMicBtn2');
                 this.roomCodeEl = document.getElementById('roomCode');
                 this.joinRoomCodeEl = document.getElementById('joinRoomCode');
                 this.statusEl = document.getElementById('status');
