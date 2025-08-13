@@ -657,16 +657,29 @@
             async initializePeerConnection() {
                 const config = {
                     iceServers: [
+                        // Multiple STUN servers
                         { urls: 'stun:stun.l.google.com:19302' },
                         { urls: 'stun:stun1.l.google.com:19302' },
                         { urls: 'stun:stun2.l.google.com:19302' },
                         { urls: 'stun:stun3.l.google.com:19302' },
                         { urls: 'stun:stun4.l.google.com:19302' },
-                        // Add more STUN servers for better connectivity
                         { urls: 'stun:stun.services.mozilla.com' },
-                        { urls: 'stun:stun.ekiga.net' }
+                        { urls: 'stun:stun.ekiga.net' },
+                        // Free TURN servers (these help with restrictive networks)
+                        {
+                            urls: 'turn:openrelay.metered.ca:80',
+                            username: 'openrelayproject',
+                            credential: 'openrelayproject'
+                        },
+                        {
+                            urls: 'turn:openrelay.metered.ca:443',
+                            username: 'openrelayproject',
+                            credential: 'openrelayproject'
+                        }
                     ],
-                    iceCandidatePoolSize: 10
+                    iceCandidatePoolSize: 10,
+                    bundlePolicy: 'max-bundle',
+                    rtcpMuxPolicy: 'require'
                 };
 
                 this.peerConnection = new RTCPeerConnection(config);
@@ -685,13 +698,15 @@
                     this.connectionEstablished = true;
                 };
 
-                // Handle ICE candidates with better logging
+                // Handle ICE candidates with detailed logging
                 this.peerConnection.onicecandidate = (event) => {
                     if (event.candidate) {
-                        console.log('📡 New ICE candidate:', event.candidate.type);
+                        const candidate = event.candidate;
+                        console.log(`📡 ICE candidate: ${candidate.type} (${candidate.protocol}) - ${candidate.address || 'relay'}`);
+                        
                         this.shareConnectionData({
                             type: 'ice-candidate',
-                            candidate: event.candidate,
+                            candidate: candidate,
                             roomCode: this.roomCode
                         });
                     } else {
@@ -699,7 +714,7 @@
                     }
                 };
 
-                // Enhanced connection state handling
+                // Enhanced connection state handling with timeouts
                 this.peerConnection.onconnectionstatechange = () => {
                     const state = this.peerConnection.connectionState;
                     console.log('🔗 Connection state:', state);
@@ -708,38 +723,75 @@
                         this.showStatus('🎉 Connected! You can now talk.', 'connected');
                         this.controlsEl.classList.add('show');
                         this.connectionEstablished = true;
+                        if (this.connectionTimeout) {
+                            clearTimeout(this.connectionTimeout);
+                            this.connectionTimeout = null;
+                        }
                     } else if (state === 'connecting') {
-                        this.showStatus('🔄 Establishing connection...', 'connecting');
+                        this.showStatus('🔄 Establishing connection... (this may take 30-60 seconds)', 'connecting');
+                        
+                        // Set a longer timeout for difficult networks
+                        if (this.connectionTimeout) clearTimeout(this.connectionTimeout);
+                        this.connectionTimeout = setTimeout(() => {
+                            if (this.peerConnection.connectionState === 'connecting') {
+                                console.log('⏱️ Connection timeout reached');
+                                this.showStatus('⏱️ Connection taking too long. Try these solutions:\n\n• Both devices use same WiFi network\n• Disable VPN if using one\n• Try mobile hotspot\n• Check if corporate firewall blocks P2P', 'error');
+                            }
+                        }, 60000);
+                        
                     } else if (state === 'disconnected') {
                         this.showStatus('⚠️ Connection lost. Attempting to reconnect...', 'connecting');
-                        // Try to reconnect
                         setTimeout(() => this.attemptReconnect(), 2000);
                     } else if (state === 'failed') {
-                        this.showStatus('❌ Connection failed. This might be due to firewall/network restrictions. Try refreshing both pages.', 'error');
+                        this.showStatus('❌ Connection failed due to network restrictions.\n\nTry:\n• Same WiFi network\n• Disable firewall temporarily\n• Use mobile hotspot\n• Refresh both pages', 'error');
                         this.controlsEl.classList.remove('show');
                     }
                 };
 
-                // ICE connection state
+                // ICE connection state with more details
                 this.peerConnection.oniceconnectionstatechange = () => {
                     const iceState = this.peerConnection.iceConnectionState;
                     console.log('🧊 ICE connection state:', iceState);
                     
-                    if (iceState === 'failed' || iceState === 'disconnected') {
-                        console.log('🔄 ICE connection issues, may need TURN server for this network');
+                    if (iceState === 'checking') {
+                        console.log('🔍 Testing connection paths...');
+                    } else if (iceState === 'connected') {
+                        console.log('✅ Direct P2P connection established');
+                    } else if (iceState === 'completed') {
+                        console.log('🎯 Connection fully established');
+                    } else if (iceState === 'failed') {
+                        console.log('❌ All connection attempts failed - network may be too restrictive');
+                        this.showStatus('🚫 Network too restrictive for P2P connection.\n\nSolutions:\n• Same WiFi network\n• Mobile hotspot\n• Different network location', 'error');
+                    } else if (iceState === 'disconnected') {
+                        console.log('📶 Connection quality poor, trying to reconnect...');
                     }
                 };
 
-                // Data channel for keep-alive (helps maintain connection)
-                this.dataChannel = this.peerConnection.createDataChannel('keepalive');
+                // ICE gathering state
+                this.peerConnection.onicegatheringstatechange = () => {
+                    console.log('🌐 ICE gathering state:', this.peerConnection.iceGatheringState);
+                };
+
+                // Data channel for keep-alive and connection testing
+                this.dataChannel = this.peerConnection.createDataChannel('keepalive', {
+                    ordered: false,
+                    maxRetransmits: 0
+                });
+                
                 this.dataChannel.onopen = () => {
-                    console.log('📡 Data channel opened');
-                    // Send keep-alive every 30 seconds
+                    console.log('📡 Data channel opened - connection is solid');
                     this.keepAliveInterval = setInterval(() => {
                         if (this.dataChannel.readyState === 'open') {
-                            this.dataChannel.send('ping');
+                            this.dataChannel.send(`ping-${Date.now()}`);
                         }
                     }, 30000);
+                };
+
+                this.dataChannel.onmessage = (event) => {
+                    if (event.data.startsWith('ping-')) {
+                        // Respond to ping to keep connection alive
+                        this.dataChannel.send('pong-' + event.data.split('-')[1]);
+                    }
                 };
             }
 
@@ -845,7 +897,43 @@
                 this.remoteAudio.volume = volume;
             }
 
+            async attemptReconnect() {
+                if (this.connectionEstablished) return; // Already connected
+                
+                console.log('🔄 Attempting to reconnect...');
+                this.showStatus('🔄 Reconnecting...', 'connecting');
+                
+                // Clear old connection data and try again
+                if (this.roomCode) {
+                    localStorage.removeItem(`voice-chat-${this.roomCode}`);
+                }
+                
+                try {
+                    // Reinitialize peer connection
+                    if (this.peerConnection) {
+                        this.peerConnection.close();
+                    }
+                    
+                    await this.initializePeerConnection();
+                    
+                    if (this.isInitiator) {
+                        this.waitForConnection();
+                    } else {
+                        await this.joinExistingRoom();
+                    }
+                } catch (error) {
+                    console.error('Reconnection failed:', error);
+                    this.showStatus('❌ Reconnection failed. Please refresh both pages and try again.', 'error');
+                }
+            }
+
             hangUp() {
+                // Clear keep-alive interval
+                if (this.keepAliveInterval) {
+                    clearInterval(this.keepAliveInterval);
+                    this.keepAliveInterval = null;
+                }
+                
                 if (this.peerConnection) {
                     this.peerConnection.close();
                 }
